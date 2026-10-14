@@ -27,24 +27,34 @@ export function FilterProvider({ children }) {
 
 // Loads a live view with the current filters.
 export function useRows(source) {
-  const { range } = useFilters()
+  const { range, f } = useFilters()
   const [s, setS] = useState({ rows: [], loading: false, err: '' })
   useEffect(() => {
-    if (!range) { setS({ rows: [], loading: false, err: '' }); return }
+    // For 'all' mode, range can be null - we still want to fetch all data
+    // Only skip fetch when user hasn't selected a valid filter (not all mode)
+    const isAllMode = f.mode === 'all'
+
+    if (!range && !isAllMode) { setS({ rows: [], loading: false, err: '' }); return }
+
     let off = false
     setS((x) => ({ ...x, loading: true, err: '' }))
-    fetchRows(source, range)
+    // For all mode, pass empty range to get all records
+    const fetchRange = isAllMode ? { from: null, to: null, state: null } : range
+    fetchRows(source, fetchRange)
       .then((rows) => !off && setS({ rows, loading: false, err: '' }))
       .catch((e) => !off && setS({ rows: [], loading: false, err: e.message }))
     return () => { off = true }
-  }, [range, source])
+  }, [range, f.mode, source])
   return { ...s, range }
 }
 
 export function Gate({ range, loading, err, children }) {
   if (err) return <p className="notice">{err}</p>
-  // Allow all-time view even when range is null for 'all' mode
-  if (!range) return <p className="muted center">Pick a date / month / range to load data.</p>
+  // Don't show "Pick a date" for 'all' mode - range can be null there
+  // Only show message when user hasn't selected any valid filter yet
+  const { f } = useFilters()
+  const isAllMode = f.mode === 'all'
+  if (!range && !isAllMode) return <p className="muted center">Pick a date / month / range to load data.</p>
   if (loading) return <p className="muted center">Loading…</p>
   return children
 }
@@ -78,7 +88,6 @@ export function FilterBar() {
         </select></label>
       {f.stateView !== 'all' && <label>Count<input type="number" min="1" max="36" value={f.stateCount} onChange={set('stateCount')} style={{ width: 60 }} /></label>}
       <span className="grow" />
-      {role !== 'admin' && <button className="ghost" onClick={() => nav('/shares')}>Share this view</button>}
     </section>
   )
 }

@@ -44,8 +44,8 @@ function Header() {
   )
 }
 
-const mis = (path, title, source, keyCol, label) =>
-  <Route key={path} path={path} element={<Mis key={source} title={title} source={source} keyCol={keyCol} label={label} />} />
+const mis = (path, title, source, keyCol, label, defaultChart = 'bar') =>
+  <Route key={path} path={path} element={<Mis key={source} title={title} source={source} keyCol={keyCol} label={label} defaultChart={defaultChart} />} />
 
 export default function App() {
   return (
@@ -56,10 +56,10 @@ export default function App() {
         <Route path="/admin/login" element={<Login admin />} />
         <Route path="/share-action" element={<ShareAction />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        {mis('/mis/party', 'Party-wise MIS', 'v_party_mis', 'client', 'Party / client')}
-        {mis('/mis/sku', 'SKU-wise MIS', 'v_sku_mis', 'sku', 'SKU')}
-        {mis('/mis/category', 'Category-wise MIS', 'v_category_mis', 'category', 'Category')}
-        {mis('/mis/print-type', 'Print Type-wise MIS', 'v_print_mis', 'print_type', 'Print type')}
+        {mis('/mis/party', 'Party-wise MIS', 'v_party_mis', 'client', 'Party / client', 'pie')}
+        {mis('/mis/sku', 'SKU-wise MIS', 'v_sku_mis', 'sku', 'SKU', 'bar')}
+        {mis('/mis/category', 'Category-wise MIS', 'v_category_mis', 'category', 'Category', 'bar')}
+        {mis('/mis/print-type', 'Print Type-wise MIS', 'v_print_mis', 'print_type', 'Print type', 'histogram')}
         {mis('/mis/salesperson', 'Salesperson MIS', 'v_salesperson_mis', 'salesperson', 'Salesperson')}
         <Route path="/mis/overall" element={<Overall />} />
         <Route path="/admin" element={<Guard admin><Admin /></Guard>} />

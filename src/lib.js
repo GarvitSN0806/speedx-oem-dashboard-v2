@@ -24,9 +24,11 @@ export async function fetchRows(source, { from, to, state } = {}) {
   for (let i = 0; ; i += size) {
     let q = supabase.from(source).select('*')
     ORDER[source].forEach((c) => { q = q.order(c, { ascending: c !== 'date' }) })
+    // Apply date filters - use 'date' column for filtering (views have date field)
+    // For gte/lte, use string comparison which works for ISO date strings
     if (from) q = q.gte('date', from)
     if (to) q = q.lte('date', to)
-    // Always show all-time if mode is all (from/to are null anyway)
+    // Apply state filter when a state is selected
     if (state) q = q.eq('state', state)
     const { data, error } = await q.range(i, i + size - 1)
     if (error) throw error
@@ -41,11 +43,15 @@ export const fetchSales = (f) => fetchRows('sales', f)
 export function toRange(f) {
   const state = f.state || null
   if (f.mode === 'all') return { from: null, to: null, state }
-  if (f.mode === 'day') return f.day ? { from: f.day, to: f.day, state } : null
+  if (f.mode === 'day') return f.day ? { from: f.day, to: f.day, state } : { from: null, to: null, state }
   if (f.mode === 'month') {
     if (!f.month) return null
     const [y, m] = f.month.split('-').map(Number)
-    return { from: `${f.month}-01`, to: `${f.month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`, state }
+    return {
+      from: `${f.month}-01`,
+      to: `${f.month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`,
+      state
+    }
   }
   return f.start && f.end ? { from: f.start, to: f.end, state } : null
 }
