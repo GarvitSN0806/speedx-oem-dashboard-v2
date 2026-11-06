@@ -41,7 +41,7 @@ create table public.sales (
   month date generated always as
     (make_date(extract(year from date)::int, extract(month from date)::int, 1)) stored,
   state text not null, zone text not null, town_city text not null,
-  company text not null, client text not null,
+  company text not null, client text not null, salesperson text not null,
   sku text not null, category text not null, print_type text not null,
   order_qty bigint not null check (order_qty >= 0),
   dispatch_qty bigint not null check (dispatch_qty >= 0),
@@ -77,12 +77,13 @@ create policy "admin update" on public.sales for update to authenticated using (
 create policy "admin delete" on public.sales for delete to authenticated using (public.is_admin());
 
 -- ---------- Live views (always computed from sales; security_invoker => RLS applies) ----------
--- Grain includes date + state so the app can filter by date range / state, then sum.
-create or replace view public.v_sales_daily with (security_invoker = true) as
-select date, state, zone, town_city, company, client,
+-- Grain includes date + state + sku + category + print_type + salesperson so the app can filter and group by any dimension.
+drop view if exists public.v_sales_daily;
+create view public.v_sales_daily with (security_invoker = true) as
+select date, state, zone, town_city, company, client, sku, category, print_type, salesperson,
   count(*)::bigint as record_count, sum(total_units)::bigint as total_units,
   sum(total_cost) as total_cost, sum(total_selling) as total_selling, sum(gross_profit) as gross_profit
-from public.sales group by date, state, zone, town_city, company, client;
+from public.sales group by date, state, zone, town_city, company, client, sku, category, print_type, salesperson;
 
 create or replace view public.v_party_mis with (security_invoker = true) as
 select date, state, client, sum(order_qty)::bigint as order_qty, sum(dispatch_qty)::bigint as dispatch_qty, sum(pending_qty)::bigint as pending_qty
@@ -96,12 +97,15 @@ from public.sales group by date, state, category;
 create or replace view public.v_print_mis with (security_invoker = true) as
 select date, state, print_type, sum(order_qty)::bigint as order_qty, sum(dispatch_qty)::bigint as dispatch_qty, sum(pending_qty)::bigint as pending_qty
 from public.sales group by date, state, print_type;
+create or replace view public.v_salesperson_mis with (security_invoker = true) as
+select date, state, salesperson, sum(order_qty)::bigint as order_qty, sum(dispatch_qty)::bigint as dispatch_qty, sum(pending_qty)::bigint as pending_qty
+from public.sales group by date, state, salesperson;
 create or replace view public.v_overall_mis with (security_invoker = true) as
 select date, state, sum(order_qty)::bigint as order_qty, sum(dispatch_qty)::bigint as dispatch_qty, sum(pending_qty)::bigint as pending_qty
 from public.sales group by date, state;
 
-revoke all on public.v_sales_daily, public.v_party_mis, public.v_sku_mis, public.v_category_mis, public.v_print_mis, public.v_overall_mis from anon;
-grant select on public.v_sales_daily, public.v_party_mis, public.v_sku_mis, public.v_category_mis, public.v_print_mis, public.v_overall_mis to authenticated;
+revoke all on public.v_sales_daily, public.v_party_mis, public.v_sku_mis, public.v_category_mis, public.v_print_mis, public.v_salesperson_mis, public.v_overall_mis from anon;
+grant select on public.v_sales_daily, public.v_party_mis, public.v_sku_mis, public.v_category_mis, public.v_print_mis, public.v_salesperson_mis, public.v_overall_mis to authenticated;
 
 create or replace function public.distinct_states() returns setof text
 language sql stable as $$ select distinct state from public.sales order by 1 $$;

@@ -142,6 +142,7 @@ button.link:hover { transform: none; text-decoration: underline; background: non
 
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .stats.three { grid-template-columns: repeat(3, 1fr); }
+.stats.four { grid-template-columns: repeat(4, 1fr); }
 .stats div {
   display: flex; flex-direction: column; gap: 4px;
   background: rgba(255, 255, 255, 0.5);
@@ -183,7 +184,7 @@ td { font-weight: 500; }
 
 @media (max-width: 800px) {
   .cols { grid-template-columns: 1fr; }
-  .stats.three { grid-template-columns: 1fr; }
+  .stats.three, .stats.four { grid-template-columns: 1fr; }
   .page { padding: 20px 16px; }
 }
 

@@ -1,21 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie,
   XAxis, YAxis, Tooltip, CartesianGrid, Cell, Legend,
 } from 'recharts'
-import { computeInsights, inr, num } from '../lib'
-import { FilterBar, Gate, useRows, useFilters } from '../filters'
+import { computeInsights, inr, num, fetchRows } from '../lib'
+import { FilterBar, Gate, useFilters } from '../filters'
 
 const tick = (v) => (v >= 1e5 ? `${(v / 1e5).toFixed(0)}L` : v)
 const getColors = (len) => Array.from({ length: len }, (_, i) => `hsl(${(i * 137) % 360}, 65%, 50%)`)
 
 const VIEWS = [
   { value: 'profit',      label: 'Profit Overall Summary' },
-  { value: 'sku',         label: 'SKU-wise Sales & Gross Profit' },
+  { value: 'category',    label: 'Category-wise Sales & Gross Profit' },
   { value: 'party',       label: 'Party-wise Sales & Gross Profit' },
   { value: 'print',       label: 'Print Type-wise Sales & Gross Profit' },
-  { value: 'category',    label: 'Category-wise Sales & Gross Profit' },
-  { value: 'salesperson', label: 'Salesperson-wise Sales & Gross Profit' },
+  { value: 'sku',         label: 'SKU-wise Sales & Gross Profit' },
+  { value: 'salesperson', label: 'Concerned Person-wise Sales & Gross Profit' },
 ]
 
 // ── Chart toggle ──────────────────────────────────────────────────────────────
@@ -35,28 +35,43 @@ function ChartSelector({ value, onChange }) {
 function DualChart({ type, data }) {
   if (!data.length) return <p className="muted center">No data available.</p>
   const colors = getColors(data.length)
-  const top = data.slice(0, 12)
+  const top = data.slice(0, 15)
 
   if (type === 'pie') {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {[['Sales', 'sales', '#3b82f6'], ['Gross Profit', 'profit', '#10b981']].map(([title, key, baseColor]) => (
-          <div key={key}>
-            <p style={{ textAlign: 'center', fontWeight: 600, marginBottom: 8 }}>{title}</p>
-            <div style={{ height: 280 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={top} cx="50%" cy="50%" innerRadius={40} outerRadius={100}
-                    dataKey={key} nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}>
-                    {top.map((_, i) => <Cell key={i} fill={colors[i]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => inr(v)} />
-                </PieChart>
-              </ResponsiveContainer>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+        {[['Sales', 'sales'], ['Gross Profit', 'profit']].map(([title, key]) => {
+          const pieData = top.filter((d) => Number(d[key]) > 0)
+          return (
+            <div key={key}>
+              <p style={{ textAlign: 'center', fontWeight: 600, marginBottom: 8 }}>{title}</p>
+              <div style={{ height: 280 }}>
+                {pieData.length === 0 ? (
+                  <p className="muted center" style={{ paddingTop: 100 }}>No positive {title.toLowerCase()} values to display.</p>
+                ) : (
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={95}
+                        dataKey={key}
+                        nameKey="name"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        labelLine={false}
+                      >
+                        {pieData.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => inr(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     )
   }
@@ -67,7 +82,7 @@ function DualChart({ type, data }) {
         <ResponsiveContainer>
           <LineChart data={top}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="name" angle={-40} textAnchor="end" height={80} />
+            <XAxis dataKey="name" angle={-35} textAnchor="end" height={80} interval={0} tick={{ fontSize: 12 }} />
             <YAxis tickFormatter={tick} />
             <Tooltip formatter={(v) => inr(v)} />
             <Legend />
@@ -85,7 +100,7 @@ function DualChart({ type, data }) {
       <ResponsiveContainer>
         <BarChart data={top}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="name" angle={-40} textAnchor="end" height={80} />
+          <XAxis dataKey="name" angle={-35} textAnchor="end" height={80} interval={0} tick={{ fontSize: 12 }} />
           <YAxis tickFormatter={tick} />
           <Tooltip formatter={(v) => inr(v)} />
           <Legend />
@@ -133,10 +148,16 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
   const allData = useMemo(() => {
     const m = {}
     rows.forEach((r) => {
-      const k = r[dimKey] || '—'
-      if (!m[k]) m[k] = { name: k, sales: 0, profit: 0 }
-      m[k].sales  += Number(r.total_selling)
-      m[k].profit += Number(r.gross_profit)
+      const rawVal = r[dimKey]
+      const k = (rawVal != null && String(rawVal).trim() && String(rawVal).trim() !== '—')
+        ? String(rawVal).trim()
+        : 'Unspecified'
+      if (!m[k]) m[k] = { name: k, sales: 0, profit: 0, units: 0, cost: 0, count: 0 }
+      m[k].sales  += Number(r.total_selling || 0)
+      m[k].profit += Number(r.gross_profit || 0)
+      m[k].units  += Number(r.total_units || 0)
+      m[k].cost   += Number(r.total_cost || 0)
+      m[k].count  += Number(r.record_count || 1)
     })
     return Object.values(m).sort((a, b) => b.sales - a.sales)
   }, [rows, dimKey])
@@ -150,6 +171,8 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
   // KPIs reflect filtered data
   const totSales  = data.reduce((s, d) => s + d.sales, 0)
   const totProfit = data.reduce((s, d) => s + d.profit, 0)
+  const totUnits  = data.reduce((s, d) => s + d.units, 0)
+  const totCost   = data.reduce((s, d) => s + d.cost, 0)
   const margin    = totSales ? ((totProfit / totSales) * 100).toFixed(1) : '0.0'
 
   return (
@@ -160,7 +183,7 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
           <SearchBar
             value={search}
             onChange={setSearch}
-            placeholder={`Search ${label}…`}
+            placeholder={`Search ${label.toLowerCase()}…`}
           />
           {search && (
             <span className="muted small">
@@ -168,17 +191,18 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
             </span>
           )}
         </div>
-        <div className="stats three">
+        <div className="stats four">
+          <div><span>Total Units</span><b>{num(totUnits)}</b></div>
           <div><span>Total Sales</span><b>{inr(totSales)}</b></div>
           <div><span>Total Gross Profit</span><b className={totProfit < 0 ? 'neg' : 'pos'}>{inr(totProfit)}</b></div>
-          <div><span>Margin</span><b>{margin}%</b></div>
+          <div><span>Overall Margin</span><b>{margin}%</b></div>
         </div>
       </section>
 
       {/* Chart */}
       <section className="card">
         <div className="row" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>{label} — Sales & Gross Profit{search ? ` · "${search}"` : ''}</h3>
+          <h3 style={{ margin: 0 }}>{label} — Sales &amp; Gross Profit Breakdown{search ? ` · "${search}"` : ''}</h3>
           <span className="grow" />
           <ChartSelector value={chartType} onChange={setChartType} />
         </div>
@@ -188,7 +212,7 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
       {/* Table */}
       <section className="card">
         <div className="row" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Detailed Table</h3>
+          <h3 style={{ margin: 0 }}>Detailed {label} Performance Table</h3>
           {search && <span className="muted small">Showing results for "{search}"</span>}
         </div>
         <div className="scroll tall">
@@ -197,32 +221,42 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
               <tr>
                 <th>#</th>
                 <th>{label}</th>
-                <th className="r">Sales</th>
+                <th className="r">Units Sold</th>
+                <th className="r">Cost Price</th>
+                <th className="r">Sales Amount</th>
                 <th className="r">Gross Profit</th>
                 <th className="r">Margin %</th>
+                <th className="r">% Profit Share</th>
               </tr>
             </thead>
             <tbody>
               {data.length === 0 ? (
-                <tr><td colSpan={5} className="muted center">No results for "{search}".</td></tr>
+                <tr><td colSpan={8} className="muted center">No results for "{search}".</td></tr>
               ) : data.map((d, i) => {
                 const mg = d.sales ? ((d.profit / d.sales) * 100).toFixed(1) : '0.0'
+                const pShare = totProfit > 0 ? ((d.profit / totProfit) * 100).toFixed(1) : '0.0'
                 return (
                   <tr key={d.name}>
                     <td className="muted small">{i + 1}</td>
-                    <td>{d.name}</td>
+                    <td><strong>{d.name}</strong></td>
+                    <td className="r">{num(d.units)}</td>
+                    <td className="r muted">{inr(d.cost)}</td>
                     <td className="r">{inr(d.sales)}</td>
                     <td className={`r ${d.profit < 0 ? 'neg' : 'pos'}`}>{inr(d.profit)}</td>
                     <td className="r muted">{mg}%</td>
+                    <td className="r muted">{pShare}%</td>
                   </tr>
                 )
               })}
               {data.length > 0 && (
                 <tr className="total">
                   <td colSpan={2}>Total {search ? `(filtered)` : ''}</td>
+                  <td className="r">{num(totUnits)}</td>
+                  <td className="r">{inr(totCost)}</td>
                   <td className="r">{inr(totSales)}</td>
                   <td className={`r ${totProfit < 0 ? 'neg' : 'pos'}`}>{inr(totProfit)}</td>
                   <td className="r">{margin}%</td>
+                  <td className="r">100%</td>
                 </tr>
               )}
             </tbody>
@@ -235,38 +269,43 @@ function DimensionSection({ rows, dimKey, label, chartType, setChartType }) {
 
 // ── Profit overall summary ────────────────────────────────────────────────────
 const INSIGHTS = [
-  ['Company with highest gross profit', 'company', inr, 'good'],
-  ['Client with highest gross profit',  'client',  inr, 'good'],
-  ['Zone with highest profit',          'zone',    inr, 'good'],
-  ['Town/city with highest profit',     'town',    inr, 'good'],
-  ['Best selling state (max units)',    'maxUnits', (v) => `${num(v)} units`, 'good'],
-  ['State with most clients',           'mostClients', (v) => `${v} clients`, 'good'],
+  ['Category with highest profit',      'category',        inr, 'good'],
+  ['Print type with highest profit',    'printType',       inr, 'good'],
+  ['SKU with highest profit',           'sku',             inr, 'good'],
+  ['Top concerned salesperson',         'salesperson',     inr, 'good'],
+  ['Company with highest gross profit', 'company',         inr, 'good'],
+  ['Client with highest gross profit',  'client',          inr, 'good'],
+  ['Zone with highest profit',          'zone',            inr, 'good'],
+  ['Town/city with highest profit',     'town',            inr, 'good'],
+  ['Best selling state (max units)',    'maxUnits',        (v) => `${num(v)} units`, 'good'],
+  ['State with most clients',           'mostClients',     (v) => `${v} clients`, 'good'],
   ['Underperforming state (lowest margin)', 'underperforming', (v) => `${v.toFixed(1)}% margin`, 'bad'],
-  ['Least selling state',               'leastSales', inr, 'bad'],
+  ['Least selling state',               'leastSales',      inr, 'bad'],
 ]
 
 function ProfitSummary({ rows }) {
   const [search, setSearch] = useState('')
 
-  // Filter rows by SKU/product search
+  // Filter rows by SKU, category, print type, salesperson, or client
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return rows
     return rows.filter((r) =>
-      (r.sku        && String(r.sku).toLowerCase().includes(q)) ||
-      (r.category   && String(r.category).toLowerCase().includes(q)) ||
-      (r.print_type && String(r.print_type).toLowerCase().includes(q)) ||
-      (r.client     && String(r.client).toLowerCase().includes(q))
+      (r.sku         && String(r.sku).toLowerCase().includes(q)) ||
+      (r.category    && String(r.category).toLowerCase().includes(q)) ||
+      (r.print_type  && String(r.print_type).toLowerCase().includes(q)) ||
+      (r.client      && String(r.client).toLowerCase().includes(q)) ||
+      (r.salesperson && String(r.salesperson).toLowerCase().includes(q))
     )
   }, [rows, search])
 
   const ins = useMemo(() => computeInsights(filteredRows), [filteredRows])
   const tot = useMemo(() => filteredRows.reduce((a, r) => ({
-    units:   a.units   + Number(r.total_units),
-    cost:    a.cost    + Number(r.total_cost),
-    records: a.records + Number(r.record_count),
-    sell:    a.sell    + Number(r.total_selling),
-    profit:  a.profit  + Number(r.gross_profit),
+    units:   a.units   + Number(r.total_units || 0),
+    cost:    a.cost    + Number(r.total_cost || 0),
+    records: a.records + Number(r.record_count || 1),
+    sell:    a.sell    + Number(r.total_selling || 0),
+    profit:  a.profit  + Number(r.gross_profit || 0),
   }), { units: 0, cost: 0, sell: 0, profit: 0, records: 0 }), [filteredRows])
 
   const margin = tot.sell ? ((tot.profit / tot.sell) * 100).toFixed(1) : '0.0'
@@ -277,8 +316,8 @@ function ProfitSummary({ rows }) {
     filteredRows.forEach((r) => {
       const k = r.date
       if (!m[k]) m[k] = { name: k, sales: 0, profit: 0 }
-      m[k].sales  += Number(r.total_selling)
-      m[k].profit += Number(r.gross_profit)
+      m[k].sales  += Number(r.total_selling || 0)
+      m[k].profit += Number(r.gross_profit || 0)
     })
     return Object.entries(m).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v)
   }, [filteredRows])
@@ -290,7 +329,7 @@ function ProfitSummary({ rows }) {
         <SearchBar
           value={search}
           onChange={setSearch}
-          placeholder="Search by SKU, category, print type, or client…"
+          placeholder="Search by SKU, category, print type, salesperson, client…"
         />
         {search && (
           <span className="muted small">
@@ -323,7 +362,7 @@ function ProfitSummary({ rows }) {
 
       <section className="card">
         <div className="row" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>Daily Sales & Profit Trend{search ? ` · "${search}"` : ''}</h3>
+          <h3 style={{ margin: 0 }}>Daily Sales &amp; Profit Trend{search ? ` · "${search}"` : ''}</h3>
           <span className="grow" />
           <ChartSelector value={trendType} onChange={setTrendType} />
         </div>
@@ -333,7 +372,7 @@ function ProfitSummary({ rows }) {
       </section>
 
       <section className="card">
-        <h3>Key Insights{search ? ` · "${search}"` : ''}</h3>
+        <h3>Key Insights &amp; Top Performers{search ? ` · "${search}"` : ''}</h3>
         <div className="insights">
           {INSIGHTS.map(([label, key, fmt, tone]) => (
             <div key={key} className={`insight ${tone}`}>
@@ -349,17 +388,61 @@ function ProfitSummary({ rows }) {
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 const DIM_MAP = {
-  sku:         { key: 'sku',         label: 'SKU' },
+  category:    { key: 'category',    label: 'Category' },
   party:       { key: 'client',      label: 'Party / Client' },
   print:       { key: 'print_type',  label: 'Print Type' },
-  category:    { key: 'category',    label: 'Category' },
-  salesperson: { key: 'salesperson', label: 'Salesperson' },
+  sku:         { key: 'sku',         label: 'SKU' },
+  salesperson: { key: 'salesperson', label: 'Concerned Sales Person' },
+}
+
+// Hook that fetches v_sales_daily, and falls back to sales table if v_sales_daily is missing dimension columns
+function useDashboardData() {
+  const { range, f } = useFilters()
+  const [s, setS] = useState({ rows: [], loading: false, err: '' })
+
+  useEffect(() => {
+    const isAllMode = f.mode === 'all'
+    if (!range && !isAllMode) {
+      setS({ rows: [], loading: false, err: '' })
+      return
+    }
+
+    let off = false
+    setS((x) => ({ ...x, loading: true, err: '' }))
+    const fetchRange = isAllMode ? { from: null, to: null, state: null } : range
+
+    async function load() {
+      try {
+        let data = await fetchRows('v_sales_daily', fetchRange)
+        // Check if v_sales_daily in Supabase has the dimension fields
+        const sample = data[0]
+        const hasDims = sample && (sample.category !== undefined || sample.sku !== undefined || sample.print_type !== undefined)
+        if (data.length > 0 && !hasDims) {
+          // If the database view has not yet been re-created with the new schema columns,
+          // load directly from the sales table so category, print_type, sku, and salesperson are available
+          data = await fetchRows('sales', fetchRange)
+        }
+        if (!off) setS({ rows: data, loading: false, err: '' })
+      } catch (e1) {
+        // Fall back to sales table on view error
+        try {
+          const fallbackData = await fetchRows('sales', fetchRange)
+          if (!off) setS({ rows: fallbackData, loading: false, err: '' })
+        } catch (e2) {
+          if (!off) setS({ rows: [], loading: false, err: e1.message || e2.message })
+        }
+      }
+    }
+
+    load()
+    return () => { off = true }
+  }, [range, f.mode])
+
+  return { ...s, range }
 }
 
 export default function Dashboard() {
-  const { rows, loading, err, range } = useRows('v_sales_daily')
-  const { f } = useFilters()
-
+  const { rows, loading, err, range } = useDashboardData()
   const [view, setView]           = useState('profit')
   const [chartType, setChartType] = useState('bar')
   // key resets internal search state when view changes

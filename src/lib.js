@@ -77,10 +77,16 @@ export function aggregate(rows, key) {
   return Object.values(m).sort((a, b) => b.order - a.order)
 }
 
-// ---- insights (rows come from v_sales_daily) ----
+
+// ---- insights (rows come from v_sales_daily or sales) ----
 const group = (rows, key, fn) => {
   const m = {}
-  rows.forEach((r) => { const k = r[key] || '—'; m[k] = (m[k] || 0) + fn(r) })
+  rows.forEach((r) => {
+    const raw = r[key]
+    const k = (raw != null && String(raw).trim() && String(raw).trim() !== '—') ? String(raw).trim() : ''
+    if (!k) return
+    m[k] = (m[k] || 0) + fn(r)
+  })
   return m
 }
 const pick = (m, dir = 1) => {
@@ -90,11 +96,11 @@ const pick = (m, dir = 1) => {
   return { name: e[0][0], value: e[0][1] }
 }
 export function computeInsights(rows) {
-  const gp = (r) => Number(r.gross_profit), u = (r) => Number(r.total_units), s = (r) => Number(r.total_selling)
+  const gp = (r) => Number(r.gross_profit || 0), u = (r) => Number(r.total_units || 0), s = (r) => Number(r.total_selling || 0)
   const stateSales = group(rows, 'state', s)
   const stateProfit = group(rows, 'state', gp)
   const clients = {}
-  rows.forEach((r) => { (clients[r.state] ||= new Set()).add(r.client) })
+  rows.forEach((r) => { if (r.state && r.client) (clients[r.state] ||= new Set()).add(r.client) })
   const clientCount = Object.fromEntries(Object.entries(clients).map(([k, v]) => [k, v.size]))
   const margin = Object.fromEntries(
     Object.keys(stateSales).map((k) => [k, stateSales[k] ? (stateProfit[k] / stateSales[k]) * 100 : 0]))
@@ -104,6 +110,10 @@ export function computeInsights(rows) {
     client: pick(group(rows, 'client', gp)),
     zone: pick(group(rows, 'zone', gp)),
     town: pick(group(rows, 'town_city', gp)),
+    category: pick(group(rows, 'category', gp)),
+    printType: pick(group(rows, 'print_type', gp)),
+    sku: pick(group(rows, 'sku', gp)),
+    salesperson: pick(group(rows, 'salesperson', gp)),
     maxUnits: pick(group(rows, 'state', u)),
     mostClients: pick(clientCount),
     underperforming: pick(margin, -1),
